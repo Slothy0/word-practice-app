@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Word Practice</title>
+<style>
+:root{--bg:#f3f7fa;--ink:#10212e;--accent:#0b5c7a;--good:#1b6e3c}
+*{box-sizing:border-box}
+body{margin:0;font-family:Verdana,Tahoma,sans-serif;background:var(--bg);color:var(--ink);font-size:24px;line-height:1.4}
+main{max-width:720px;margin:0 auto;padding:24px;text-align:center}
+h1{font-size:28px;margin:0 0 8px}
+.pic{font-size:160px;line-height:1.1;margin:8px 0}
+button{font:inherit;min-height:72px;padding:12px 24px;margin:8px;border:3px solid var(--ink);border-radius:14px;background:#fff;color:var(--ink);cursor:pointer}
+button:hover{background:#e3eef4}
+button:focus-visible{outline:5px solid #e08a00;outline-offset:3px}
+button:disabled{opacity:.45;cursor:default}
+.choices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.choices button{margin:0}
+.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.primary:hover{background:#08475f}
+.right{background:#d7efdf;border-color:var(--good)}
+#msg{min-height:2em;font-weight:bold}
+.hidden{display:none}
+@media(max-width:520px){.choices{grid-template-columns:1fr}.pic{font-size:120px}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Word practice: groceries</h1>
+  <p id="progress"></p>
+
+  <section id="quiz">
+    <div class="pic" id="pic" aria-hidden="true"></div>
+    <button id="hear">Hear the word</button>
+    <p>What is this?</p>
+    <div class="choices" id="choices"></div>
+    <p id="msg" role="status" aria-live="polite"></p>
+    <div id="rate" class="hidden">
+      <p>How was that one?</p>
+      <button id="easy">Easy</button>
+      <button id="hard">Hard</button>
+    </div>
+  </section>
+
+  <section id="done" class="hidden">
+    <h2>All done for today</h2>
+    <p>Good work. Come back tomorrow.</p>
+    <button class="primary" id="again">Practice again</button>
+  </section>
+</main>
+
+<script>
+// Pictures are emoji for now. Later: replace with image files and move this list to a JSON file.
+const WORDS = [
+  ["apple","🍎"],["banana","🍌"],["bread","🍞"],["milk","🥛"],
+  ["cheese","🧀"],["egg","🥚"],["carrot","🥕"],["fish","🐟"]
+];
+const SESSION_LENGTH = 10;
+
+let stats = loadStats();      // { word: { hard: n, easy: n } }
+let current = null, count = 0, missed = false;
+
+const $ = id => document.getElementById(id);
+
+function loadStats() {
+  try { return JSON.parse(localStorage.getItem("stats")) || {}; }
+  catch (e) { return {}; }
+}
+function saveStats() {
+  try { localStorage.setItem("stats", JSON.stringify(stats)); } catch (e) {}
+}
+function record(word, kind) {
+  stats[word] = stats[word] || { hard: 0, easy: 0 };
+  stats[word][kind]++;
+  saveStats();
+}
+
+// Words marked hard come up more often; easy ones less often (minimum weight 1).
+function weight(word) {
+  const s = stats[word] || { hard: 0, easy: 0 };
+  return Math.max(1, 1 + 2 * s.hard - s.easy);
+}
+function pickWord() {
+  const pool = WORDS.filter(w => !current || w[0] !== current[0]);
+  const total = pool.reduce((sum, w) => sum + weight(w[0]), 0);
+  let r = Math.random() * total;
+  for (const w of pool) { r -= weight(w[0]); if (r <= 0) return w; }
+  return pool[0];
+}
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function speak(text) {
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 0.8;
+  speechSynthesis.speak(u);
+}
+
+function nextQuestion() {
+  current = pickWord();
+  missed = false;
+  $("pic").textContent = current[1];
+  $("msg").textContent = "";
+  $("rate").classList.add("hidden");
+  $("progress").textContent = "Question " + (count + 1) + " of " + SESSION_LENGTH;
+
+  const distractors = shuffle(WORDS.filter(w => w[0] !== current[0])).slice(0, 3);
+  const options = shuffle([current, ...distractors]);
+  $("choices").replaceChildren(...options.map(w => {
+    const b = document.createElement("button");
+    b.textContent = w[0];
+    b.onclick = () => choose(b, w[0]);
+    return b;
+  }));
+}
+
+function choose(button, word) {
+  if (word === current[0]) {
+    button.classList.add("right");
+    $("msg").textContent = "Yes: " + word;
+    speak(word);
+    document.querySelectorAll("#choices button").forEach(b => b.disabled = true);
+    $("rate").classList.remove("hidden");
+  } else {
+    button.disabled = true;
+    $("msg").textContent = "Not quite. Try again.";
+    if (!missed) { record(current[0], "hard"); missed = true; }
+  }
+}
+
+function rate(kind) {
+  if (!missed) record(current[0], kind);
+  count++;
+  if (count >= SESSION_LENGTH) {
+    $("quiz").classList.add("hidden");
+    $("done").classList.remove("hidden");
+    $("progress").textContent = "";
+  } else {
+    nextQuestion();
+  }
+}
+
+$("hear").onclick = () => speak(current[0]);
+$("easy").onclick = () => rate("easy");
+$("hard").onclick = () => rate("hard");
+$("again").onclick = () => {
+  count = 0; current = null;
+  $("done").classList.add("hidden");
+  $("quiz").classList.remove("hidden");
+  nextQuestion();
+};
+
+nextQuestion();
+</script>
+</body>
+</html>
